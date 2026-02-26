@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+﻿import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { supabase } from "@/lib/supabase";
 
 export interface Artwork {
   id: string;
@@ -10,115 +11,203 @@ export interface Artwork {
   imageUrl: string;
   featured: boolean;
   available: boolean;
-  price?: string;
+  price?: number | null;
+  created_at?: string;
 }
+
+interface DbArtwork {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  medium: string;
+  year: string;
+  image_url?: string;
+  imageUrl?: string;
+  featured: boolean;
+  available: boolean;
+  price?: number | null;
+  created_at?: string;
+}
+
+type ArtworkInput = Omit<Artwork, "id"> & { price?: string | number | null };
 
 interface ArtworkContextType {
   artworks: Artwork[];
-  addArtwork: (artwork: Omit<Artwork, "id">) => void;
-  updateArtwork: (id: string, artwork: Partial<Artwork>) => void;
-  deleteArtwork: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+  addArtwork: (artwork: ArtworkInput) => Promise<void>;
+  updateArtwork: (id: string, updates: Partial<ArtworkInput>) => Promise<void>;
+  deleteArtwork: (id: string) => Promise<void>;
+  refreshArtworks: () => Promise<void>;
 }
 
-const ArtworkContext = createContext<ArtworkContextType | null>(null);
+const ArtworkContext = createContext<ArtworkContextType | undefined>(undefined);
 
-import artwork1 from "@/assets/artwork-1.jpg";
-import artwork2 from "@/assets/artwork-2.jpg";
-import artwork3 from "@/assets/artwork-3.jpg";
-import artwork4 from "@/assets/artwork-4.jpg";
+export const ArtworkProvider = ({ children }: { children: ReactNode }) => {
+  const [artworks, setArtworks] = useState<Artwork[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-const DEFAULT_ARTWORKS: Artwork[] = [
-  {
-    id: "1",
-    title: "Terracotta Dreams",
-    description: "A flowing exploration of warm earthy tones, capturing the essence of sun-baked landscapes and the quiet poetry of desert winds.",
-    category: "Abstract",
-    medium: "Watercolor on paper",
-    year: "2024",
-    imageUrl: artwork1,
-    featured: true,
-    available: true,
-    price: "₦45,000",
-  },
-  {
-    id: "2",
-    title: "Collision & Gold",
-    description: "Bold gestural marks meet gold leaf — a conversation between chaos and order, raw emotion poured into every stroke.",
-    category: "Abstract",
-    medium: "Acrylic & Gold Leaf on Canvas",
-    year: "2024",
-    imageUrl: artwork2,
-    featured: true,
-    available: false,
-    price: "₦80,000",
-  },
-  {
-    id: "3",
-    title: "Whisper of Spring",
-    description: "A delicate botanical study in ink and watercolor, honoring the gentle persistence of new growth.",
-    category: "Botanical",
-    medium: "Ink & Watercolor",
-    year: "2023",
-    imageUrl: artwork3,
-    featured: true,
-    available: true,
-    price: "₦35,000",
-  },
-  {
-    id: "4",
-    title: "Deep Divide",
-    description: "A dramatic interplay of electric blue and terracotta — the tension of opposites finding unexpected harmony.",
-    category: "Abstract",
-    medium: "Oil on Canvas",
-    year: "2023",
-    imageUrl: artwork4,
-    featured: false,
-    available: true,
-    price: "₦95,000",
-  },
-];
+  const base64ToBlob = async (base64: string): Promise<Blob> => {
+    const res = await fetch(base64);
+    return await res.blob();
+  };
 
-export const ArtworkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [artworks, setArtworks] = useState<Artwork[]>(() => {
-    const stored = localStorage.getItem("syki-artworks");
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return DEFAULT_ARTWORKS;
-      }
+  const parsePrice = (
+    rawPrice: string | number | null | undefined
+  ): number | null => {
+    if (rawPrice === null || rawPrice === undefined) return null;
+    if (typeof rawPrice === "number") {
+      return Number.isNaN(rawPrice) ? null : rawPrice;
     }
-    return DEFAULT_ARTWORKS;
-  });
+
+    const cleaned = rawPrice.trim().replace(/[^0-9.-]/g, "");
+    if (!cleaned) return null;
+
+    const parsed = Number(cleaned);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const uploadImage = async (base64: string) => {
+    const blob = await base64ToBlob(base64);
+    const fileName = `${Date.now()}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("artworks")
+      .upload(fileName, blob);
+
+    if (uploadError) {
+      console.error("UPLOAD ERROR:", uploadError.message);
+      throw new Error(uploadError.message);
+    }
+
+    const { data } = supabase.storage.from("artworks").getPublicUrl(fileName);
+    return data.publicUrl;
+  };
+
+  const fetchArtworks = async () => {
+    setLoading(true);
+
+    const { data, error: fetchError } = await supabase
+      .from("artworks")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (fetchError) {
+      console.error("FETCH ERROR:", fetchError.message);
+      setError(fetchError.message);
+      setLoading(false);
+      return;
+    }
+
+    const transformed = ((data || []) as DbArtwork[]).map((item) => ({
+      ...item,
+      imageUrl: item.image_url ?? item.imageUrl ?? "",
+      price: item.price ?? null,
+    }));
+
+    setArtworks(transformed);
+    setError(null);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    localStorage.setItem("syki-artworks", JSON.stringify(artworks));
-  }, [artworks]);
+    fetchArtworks();
+  }, []);
 
-  const addArtwork = (artwork: Omit<Artwork, "id">) => {
-    const newArtwork: Artwork = { ...artwork, id: Date.now().toString() };
-    setArtworks((prev) => [newArtwork, ...prev]);
+  const addArtwork = async (artwork: ArtworkInput) => {
+    const imageUrl = await uploadImage(artwork.imageUrl);
+
+    const { error: addError } = await supabase.from("artworks").insert([
+      {
+        title: artwork.title,
+        description: artwork.description,
+        category: artwork.category,
+        medium: artwork.medium,
+        year: artwork.year,
+        featured: artwork.featured,
+        available: artwork.available,
+        price: parsePrice(artwork.price),
+        image_url: imageUrl,
+      },
+    ]);
+
+    if (addError) {
+      console.error("ADD ERROR:", addError.message);
+      throw new Error(addError.message);
+    }
+
+    await fetchArtworks();
   };
 
-  const updateArtwork = (id: string, updates: Partial<Artwork>) => {
-    setArtworks((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, ...updates } : a))
-    );
+  const updateArtwork = async (id: string, updates: Partial<ArtworkInput>) => {
+    const updateData: Record<string, unknown> = { ...updates };
+
+    if ("price" in updates) {
+      updateData.price = parsePrice(updates.price);
+    }
+
+    if ("imageUrl" in updates) {
+      const imageUrl = updates.imageUrl;
+      delete updateData.imageUrl;
+
+      if (typeof imageUrl === "string" && imageUrl.startsWith("data:")) {
+        updateData.image_url = await uploadImage(imageUrl);
+      } else if (typeof imageUrl === "string") {
+        updateData.image_url = imageUrl;
+      }
+    }
+
+    const { error: updateError } = await supabase
+      .from("artworks")
+      .update(updateData)
+      .eq("id", id);
+
+    if (updateError) {
+      console.error("UPDATE ERROR:", updateError.message);
+      throw new Error(updateError.message);
+    }
+
+    await fetchArtworks();
   };
 
-  const deleteArtwork = (id: string) => {
-    setArtworks((prev) => prev.filter((a) => a.id !== id));
+  const deleteArtwork = async (id: string) => {
+    const { error: deleteError } = await supabase
+      .from("artworks")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      console.error("DELETE ERROR:", deleteError.message);
+      throw new Error(deleteError.message);
+    }
+
+    await fetchArtworks();
   };
 
   return (
-    <ArtworkContext.Provider value={{ artworks, addArtwork, updateArtwork, deleteArtwork }}>
+    <ArtworkContext.Provider
+      value={{
+        artworks,
+        loading,
+        error,
+        addArtwork,
+        updateArtwork,
+        deleteArtwork,
+        refreshArtworks: fetchArtworks,
+      }}
+    >
       {children}
     </ArtworkContext.Provider>
   );
 };
 
 export const useArtworks = () => {
-  const ctx = useContext(ArtworkContext);
-  if (!ctx) throw new Error("useArtworks must be used inside ArtworkProvider");
-  return ctx;
+  const context = useContext(ArtworkContext);
+  if (!context) {
+    throw new Error("useArtworks must be used within ArtworkProvider");
+  }
+  return context;
 };
+

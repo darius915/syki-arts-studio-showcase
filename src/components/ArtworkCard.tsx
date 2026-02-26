@@ -1,5 +1,4 @@
-import { Link } from "react-router-dom";
-import { Artwork } from "@/context/ArtworkContext";
+﻿import { Artwork } from "@/context/ArtworkContext";
 
 interface ArtworkCardProps {
   artwork: Artwork;
@@ -9,7 +8,6 @@ interface ArtworkCardProps {
 const ArtworkCard = ({ artwork, size = "default" }: ArtworkCardProps) => {
   return (
     <div className={`artwork-card group relative overflow-hidden bg-card cursor-pointer ${size === "large" ? "rounded" : "rounded"}`}>
-      {/* Image */}
       <div className="overflow-hidden">
         <img
           src={artwork.imageUrl}
@@ -21,7 +19,6 @@ const ArtworkCard = ({ artwork, size = "default" }: ArtworkCardProps) => {
         />
       </div>
 
-      {/* Overlay on hover */}
       <div className="absolute inset-0 bg-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity duration-400 flex items-end p-5">
         <div className="text-primary-foreground translate-y-4 group-hover:translate-y-0 transition-transform duration-400">
           <p className="font-body text-xs uppercase tracking-widest text-primary-foreground/70 mb-1">
@@ -38,7 +35,6 @@ const ArtworkCard = ({ artwork, size = "default" }: ArtworkCardProps) => {
         </div>
       </div>
 
-      {/* Badges */}
       <div className="absolute top-3 right-3 flex gap-2">
         {artwork.featured && (
           <span className="px-2 py-0.5 bg-primary text-primary-foreground text-[10px] uppercase tracking-widest font-body rounded">
@@ -52,7 +48,6 @@ const ArtworkCard = ({ artwork, size = "default" }: ArtworkCardProps) => {
         )}
       </div>
 
-      {/* Info below */}
       <div className="p-4 border-t border-border">
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -60,7 +55,7 @@ const ArtworkCard = ({ artwork, size = "default" }: ArtworkCardProps) => {
               {artwork.title}
             </h3>
             <p className="font-body text-xs text-muted-foreground mt-0.5 tracking-wide">
-              {artwork.category} · {artwork.year}
+              {artwork.category} - {artwork.year}
             </p>
           </div>
           {artwork.available && artwork.price && (
@@ -75,3 +70,4 @@ const ArtworkCard = ({ artwork, size = "default" }: ArtworkCardProps) => {
 };
 
 export default ArtworkCard;
+

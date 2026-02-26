@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import ArtworkCard from "@/components/ArtworkCard";
 import { useArtworks } from "@/context/ArtworkContext";
 
@@ -17,7 +17,6 @@ const Gallery = () => {
 
   return (
     <div className="page-enter min-h-screen">
-      {/* Header */}
       <div className="pt-28 pb-12 lg:pt-36 lg:pb-16 border-b border-border">
         <div className="container mx-auto px-6 lg:px-12">
           <p className="font-body text-xs tracking-[0.25em] uppercase text-primary mb-3">
@@ -27,12 +26,11 @@ const Gallery = () => {
             The <em>Gallery</em>
           </h1>
           <p className="font-body text-sm text-muted-foreground max-w-lg leading-relaxed">
-            A curated collection of original works — each piece a chapter, each brushstroke a word in an ongoing story.
+            A curated collection of original works - each piece a chapter, each brushstroke a word in an ongoing story.
           </p>
         </div>
       </div>
 
-      {/* Filters */}
       <div className="sticky top-16 lg:top-20 z-30 bg-background/95 backdrop-blur border-b border-border">
         <div className="container mx-auto px-6 lg:px-12">
           <div className="flex flex-wrap items-center justify-between gap-4 py-4">
@@ -72,7 +70,6 @@ const Gallery = () => {
         </div>
       </div>
 
-      {/* Grid */}
       <div className="container mx-auto px-6 lg:px-12 py-12 lg:py-16">
         {filtered.length === 0 ? (
           <div className="text-center py-24">
@@ -97,11 +94,10 @@ const Gallery = () => {
         </p>
       </div>
 
-      {/* Footer */}
       <footer className="border-t border-border py-10">
         <div className="container mx-auto px-6 lg:px-12 text-center">
           <p className="font-body text-xs text-muted-foreground">
-            © {new Date().getFullYear()} Syki-Arts Studio · All rights reserved
+            (c) {new Date().getFullYear()} Syki-Arts Studio - All rights reserved
           </p>
         </div>
       </footer>
@@ -110,3 +106,4 @@ const Gallery = () => {
 };
 
 export default Gallery;
+

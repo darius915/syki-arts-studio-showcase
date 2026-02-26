@@ -1,8 +1,17 @@
-import { useState, useRef } from "react";
+﻿import { useCallback, useEffect, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { useArtworks, Artwork } from "@/context/ArtworkContext";
-import { Pencil, Trash2, Plus, Star, Eye, EyeOff, LogOut, Upload } from "lucide-react";
-
-const ADMIN_PASSWORD = "syki2024";
+import { supabase } from "@/lib/supabase";
+import {
+  Pencil,
+  Trash2,
+  Plus,
+  Star,
+  Eye,
+  EyeOff,
+  LogOut,
+  Upload,
+} from "lucide-react";
 
 const CATEGORIES = ["Abstract", "Botanical", "Portrait", "Mixed Media", "Other"];
 
@@ -32,31 +41,116 @@ const emptyForm = (): FormState => ({
 
 const Admin = () => {
   const { artworks, addArtwork, updateArtwork, deleteArtwork } = useArtworks();
-  const [authed, setAuthed] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ── Auth ── */
-  const handleLogin = (e: React.FormEvent) => {
+  const adminEmail = (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.toLowerCase();
+
+  const isAllowedAdmin = useCallback(
+    (value: string | undefined) => {
+      if (!adminEmail) return true;
+      return value?.toLowerCase() === adminEmail;
+    },
+    [adminEmail]
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    const syncSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
+
+      const current = data.session;
+      const userEmail = current?.user.email;
+
+      if (current && !isAllowedAdmin(userEmail)) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setAuthError("This user is not allowed to access admin.");
+      } else {
+        setSession(current);
+      }
+
+      setAuthLoading(false);
+    };
+
+    syncSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      const userEmail = nextSession?.user.email;
+      if (nextSession && !isAllowedAdmin(userEmail)) {
+        setAuthError("This user is not allowed to access admin.");
+        setSession(null);
+        void supabase.auth.signOut();
+        return;
+      }
+      setSession(nextSession);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [isAllowedAdmin]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
-      setAuthed(true);
-      setAuthError(false);
-    } else {
-      setAuthError(true);
+    setAuthError(null);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+
+    if (!isAllowedAdmin(data.user?.email)) {
+      await supabase.auth.signOut();
+      setAuthError("This user is not allowed to access admin.");
+      return;
+    }
+
+    setPassword("");
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setShowForm(false);
+    setEditingId(null);
+    setPassword("");
+  };
+
+  const runAction = async (action: () => Promise<void>) => {
+    try {
+      await action();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Action failed. Please try again.";
+      alert(message);
     }
   };
 
-  /* ── Image upload ── */
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (ev) => {
       const url = ev.target?.result as string;
@@ -66,11 +160,11 @@ const Admin = () => {
     reader.readAsDataURL(file);
   };
 
-  /* ── Open form ── */
   const openAdd = () => {
     setEditingId(null);
     setForm(emptyForm());
     setPreviewImg(null);
+    setSaveError(null);
     setShowForm(true);
   };
 
@@ -85,42 +179,76 @@ const Admin = () => {
       imageUrl: artwork.imageUrl,
       featured: artwork.featured,
       available: artwork.available,
-      price: artwork.price ?? "",
+      price: artwork.price != null ? String(artwork.price) : "",
     });
     setPreviewImg(artwork.imageUrl);
+    setSaveError(null);
     setShowForm(true);
   };
 
-  /* ── Submit ── */
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.imageUrl) {
       alert("Please upload an image.");
       return;
     }
-    if (editingId) {
-      updateArtwork(editingId, form);
-    } else {
-      addArtwork(form);
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (editingId) {
+        await updateArtwork(editingId, form);
+      } else {
+        await addArtwork(form);
+      }
+
+      setShowForm(false);
+      setEditingId(null);
+      setForm(emptyForm());
+      setPreviewImg(null);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Unable to save artwork. Please try again.";
+      setSaveError(message);
+    } finally {
+      setSaving(false);
     }
-    setShowForm(false);
-    setEditingId(null);
-    setForm(emptyForm());
-    setPreviewImg(null);
   };
 
-  /* ── Login Screen ── */
-  if (!authed) {
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-6">
+        <p className="font-body text-sm text-muted-foreground">Loading admin...</p>
+      </div>
+    );
+  }
+
+  if (!session) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-6">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <h1 className="font-display text-3xl font-medium text-foreground">Admin</h1>
             <p className="font-body text-xs text-muted-foreground mt-1 tracking-wide">
-              Syki-Arts Studio · Dashboard
+              Syki-Arts Studio - Dashboard
             </p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block font-body text-xs uppercase tracking-widest text-muted-foreground mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 bg-card border border-border rounded font-body text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="you@example.com"
+                autoComplete="username"
+                autoFocus
+                required
+              />
+            </div>
             <div>
               <label className="block font-body text-xs uppercase tracking-widest text-muted-foreground mb-2">
                 Password
@@ -133,10 +261,11 @@ const Admin = () => {
                   authError ? "border-destructive" : "border-border"
                 }`}
                 placeholder="Enter admin password"
-                autoFocus
+                autoComplete="current-password"
+                required
               />
               {authError && (
-                <p className="font-body text-xs text-destructive mt-1">Incorrect password.</p>
+                <p className="font-body text-xs text-destructive mt-1">{authError}</p>
               )}
             </div>
             <button
@@ -146,18 +275,13 @@ const Admin = () => {
               Sign In
             </button>
           </form>
-          <p className="font-body text-xs text-muted-foreground text-center mt-6">
-            Default password: <code className="font-mono">syki2024</code>
-          </p>
         </div>
       </div>
     );
   }
 
-  /* ── Dashboard ── */
   return (
     <div className="min-h-screen bg-background">
-      {/* Top bar */}
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-6 lg:px-12 flex items-center justify-between h-16">
           <div>
@@ -172,7 +296,7 @@ const Admin = () => {
               <Plus className="w-3.5 h-3.5" /> Add Artwork
             </button>
             <button
-              onClick={() => setAuthed(false)}
+              onClick={handleLogout}
               className="flex items-center gap-2 text-muted-foreground hover:text-foreground font-body text-xs transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" /> Sign Out
@@ -182,7 +306,6 @@ const Admin = () => {
       </header>
 
       <div className="container mx-auto px-6 lg:px-12 py-10">
-        {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
           {[
             { label: "Total Works", value: artworks.length },
@@ -197,7 +320,6 @@ const Admin = () => {
           ))}
         </div>
 
-        {/* Artworks Table */}
         <div className="bg-card border border-border rounded overflow-hidden">
           <div className="border-b border-border px-6 py-4">
             <h2 className="font-display text-xl font-medium text-foreground">All Artworks</h2>
@@ -239,7 +361,7 @@ const Admin = () => {
                     <td className="px-4 py-3 font-body text-xs text-muted-foreground">{artwork.category}</td>
                     <td className="px-4 py-3 font-body text-xs text-muted-foreground max-w-[140px] truncate">{artwork.medium}</td>
                     <td className="px-4 py-3 font-body text-xs text-muted-foreground">{artwork.year}</td>
-                    <td className="px-4 py-3 font-body text-sm text-foreground">{artwork.price || "—"}</td>
+                    <td className="px-4 py-3 font-body text-sm text-foreground">{artwork.price ?? "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
                         <span
@@ -256,14 +378,22 @@ const Admin = () => {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => updateArtwork(artwork.id, { featured: !artwork.featured })}
+                          onClick={() =>
+                            runAction(() =>
+                              updateArtwork(artwork.id, { featured: !artwork.featured })
+                            )
+                          }
                           className="p-1.5 rounded hover:bg-muted transition-colors"
                           title={artwork.featured ? "Unfeature" : "Feature"}
                         >
                           <Star className={`w-4 h-4 ${artwork.featured ? "text-primary fill-primary" : "text-muted-foreground"}`} />
                         </button>
                         <button
-                          onClick={() => updateArtwork(artwork.id, { available: !artwork.available })}
+                          onClick={() =>
+                            runAction(() =>
+                              updateArtwork(artwork.id, { available: !artwork.available })
+                            )
+                          }
                           className="p-1.5 rounded hover:bg-muted transition-colors"
                           title={artwork.available ? "Mark Sold" : "Mark Available"}
                         >
@@ -295,7 +425,6 @@ const Admin = () => {
         </div>
       </div>
 
-      {/* Add/Edit Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-background border border-border rounded w-full max-w-2xl my-8 shadow-xl">
@@ -307,11 +436,14 @@ const Admin = () => {
                 onClick={() => setShowForm(false)}
                 className="text-muted-foreground hover:text-foreground text-xl leading-none"
               >
-                ×
+                x
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
-              {/* Image upload */}
+              {saveError && (
+                <p className="font-body text-xs text-destructive">{saveError}</p>
+              )}
+
               <div>
                 <label className="block font-body text-xs uppercase tracking-widest text-muted-foreground mb-2">
                   Artwork Image *
@@ -338,7 +470,6 @@ const Admin = () => {
                 />
               </div>
 
-              {/* Grid of fields */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block font-body text-xs uppercase tracking-widest text-muted-foreground mb-2">Title *</label>
@@ -366,7 +497,7 @@ const Admin = () => {
                     value={form.year}
                     onChange={(e) => setForm((f) => ({ ...f, year: e.target.value }))}
                     className="w-full px-4 py-3 bg-card border border-border rounded font-body text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="2024"
+                    placeholder="2026"
                   />
                 </div>
                 <div className="col-span-2">
@@ -394,7 +525,7 @@ const Admin = () => {
                     value={form.price}
                     onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                     className="w-full px-4 py-3 bg-card border border-border rounded font-body text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="e.g. ₦45,000"
+                    placeholder="e.g. 45000"
                   />
                 </div>
                 <div className="flex flex-col justify-end gap-3">
@@ -422,12 +553,14 @@ const Admin = () => {
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
+                  disabled={saving}
                   className="flex-1 py-3 bg-primary text-primary-foreground font-body text-sm tracking-wide rounded hover:bg-terracotta-600 transition-colors"
                 >
-                  {editingId ? "Save Changes" : "Add Artwork"}
+                  {saving ? "Saving..." : editingId ? "Save Changes" : "Add Artwork"}
                 </button>
                 <button
                   type="button"
+                  disabled={saving}
                   onClick={() => setShowForm(false)}
                   className="px-6 py-3 border border-border text-foreground font-body text-sm rounded hover:bg-muted transition-colors"
                 >
@@ -439,7 +572,6 @@ const Admin = () => {
         </div>
       )}
 
-      {/* Delete confirm */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-background border border-border rounded p-8 max-w-sm w-full text-center shadow-xl">
@@ -449,7 +581,12 @@ const Admin = () => {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => { deleteArtwork(deleteConfirm); setDeleteConfirm(null); }}
+                onClick={() =>
+                  runAction(async () => {
+                    await deleteArtwork(deleteConfirm);
+                    setDeleteConfirm(null);
+                  })
+                }
                 className="flex-1 py-3 bg-destructive text-destructive-foreground font-body text-sm rounded hover:opacity-90 transition-opacity"
               >
                 Yes, delete
@@ -469,3 +606,5 @@ const Admin = () => {
 };
 
 export default Admin;
+
+
